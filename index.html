@@ -61,7 +61,7 @@
   <div class="note">
     <b>角标</b>：<span style="color:#ef4444">峰</span> = 当月用电最高的一天，
     <span style="color:#16a34a">谷</span> = 当月用电最低的一天。<br>
-    日用量为「当日 00:00 余额 − 次日 00:00 余额」，即完整自然日。<br>
+    日用量为「当日 00:00 余额 − 次日 00:00 余额」，即完整自然日；带 <b>*</b> 的是记录首日的不完整数据。<br>
     <span id="gen"></span>
   </div>
 
@@ -91,6 +91,8 @@ function render(rows){
   const firstWd = new Date(y, m, 1).getDay();            // 0=周日
 
   const usage = {};
+  const partialSet = new Set();
+  rows.forEach(r => { if (r && r.partial) partialSet.add(r.date); });
   rows.forEach(r => { if (r && r.usage !== null && r.usage !== undefined) usage[r.date] = Number(r.usage); });
   const prefix = `${y}-${String(m+1).padStart(2,"0")}-`;
   const mv = {};
@@ -131,7 +133,7 @@ function render(rows){
       let badge = "";
       if (key===peakKey) badge = `<span class="badge peak">峰</span>`;
       else if (key===lowKey) badge = `<span class="badge valley">谷</span>`;
-      cell.innerHTML = `${badge}<span class="d">${day}</span><span class="v">${v.toFixed(2)}</span>`;
+      cell.innerHTML = `${badge}<span class="d">${day}</span><span class="v">${v.toFixed(2)}${partialSet.has(key) ? "*" : ""}</span>`;
     }
     grid.appendChild(cell);
   }
