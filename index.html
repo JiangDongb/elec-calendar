@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -84,7 +84,8 @@ function colorFor(v){
 const hex = c => "#"+c.map(x=>x.toString(16).padStart(2,"0")).join("");
 const rgba = (c,a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
-function render(rows){
+function render(payload){
+  const rows = payload.rows || [];
   const now = new Date();
   const y = now.getFullYear(), m = now.getMonth();       // 0-based
   const days = new Date(y, m+1, 0).getDate();
@@ -145,18 +146,30 @@ function render(rows){
   for (let i=0;i<=30;i++) stops.push(`${hex(colorFor(i))} ${Math.round(i/30*100)}%`);
   document.getElementById("bar").style.background = `linear-gradient(90deg, ${stops.join(",")})`;
 
-  const latest = rows.filter(r=>r && r.balance!==null && r.balance!==undefined)
-                     .sort((a,b)=>a.date<b.date?-1:1).pop();
+  const latest = (payload.latest && payload.latest.balance !== null && payload.latest.balance !== undefined)
+    ? payload.latest
+    : rows.filter(r=>r && r.balance!==null && r.balance!==undefined).sort((a,b)=>a.date<b.date?-1:1).pop();
   document.getElementById("sub").innerHTML =
-    "数据来源：完美校园 · 云缴费" + (latest ? `　|　当前余额 ${Number(latest.balance).toFixed(2)} 度（${latest.date}）` : "");
-  document.getElementById("gen").textContent = "更新时间 " + now.toLocaleString("zh-CN",{hour12:false});
+    "数据来源：完美校园 · 云缴费" +
+    (latest ? `　|　当前余额 ${Number(latest.balance).toFixed(2)} 度（${latest.at || latest.date}）` : "");
+  const fetchedAt = new Date().toLocaleTimeString("zh-CN", {hour12:false});
+  document.getElementById("gen").textContent =
+    `数据时间 ${latest && latest.at ? latest.at : "—"}　·　页面刷新 ${fetchedAt}`;
 }
 
-fetch(DATA_URL, {cache:"no-store"})
-  .then(r => r.json())
-  .then(d => render(d.rows || []))
-  .catch(e => { document.getElementById("sub").innerHTML =
-      '<span class="err">数据加载失败：' + e + '</span>'; });
+function load(){
+  fetch(DATA_URL + "?t=" + Date.now(), {cache:"no-store"})
+    .then(r => r.json())
+    .then(render)
+    .catch(e => { document.getElementById("sub").innerHTML =
+        '<span class="err">数据加载失败：' + e + '</span>'; });
+}
+
+load();
+setInterval(load, 5 * 60 * 1000);                      // 每 5 分钟自动拉一次
+document.addEventListener("visibilitychange", () => {  // 回到前台立刻刷新
+  if (!document.hidden) load();
+});
 </script>
 </body>
 </html>
