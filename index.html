@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>电量日历</title>
+<style>
+  :root{--ink:#1f2937;--sub:#6b7280}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;padding:18px 14px 34px;background:#fff;color:var(--ink);max-width:520px;margin:0 auto;
+       font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  h1{font-size:20px;margin:6px 0 2px;font-weight:600}
+  .sub{color:var(--sub);font-size:12px;margin-bottom:16px}
+  .stats{display:flex;gap:8px;margin-bottom:18px}
+  .stat{flex:1;background:#fafbfc;border-radius:12px;padding:10px 8px;text-align:center}
+  .stat .k{font-size:11px;color:var(--sub)}
+  .stat .n{font-size:17px;font-weight:600;margin-top:4px;letter-spacing:-.3px}
+  .stat .n small{font-size:10px;font-weight:400;color:var(--sub);margin-left:2px}
+  .month{text-align:center;font-size:15px;font-weight:600;margin:4px 0 12px}
+  .week,.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+  .week div{text-align:center;font-size:11px;color:var(--sub);padding-bottom:4px}
+  .cell{position:relative;aspect-ratio:1/1.08;border-radius:12px;background:#f7f8fa;display:flex;
+        flex-direction:column;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}
+  .cell .d{position:absolute;top:6px;left:0;right:0;text-align:center;font-size:11px;opacity:.65}
+  .cell .v{font-size:15px;font-weight:600;margin-top:12px}
+  .cell.empty{background:transparent}
+  .cell.nodata{background:#fafbfc;color:#c2c7cf}
+  .cell.nodata .v{font-size:13px;font-weight:400}
+  .badge{position:absolute;top:-5px;right:-5px;font-size:10px;font-weight:600;color:#fff;width:18px;
+         height:18px;line-height:18px;text-align:center;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.18)}
+  .badge.peak{background:#ef4444}
+  .badge.valley{background:#16a34a}
+  .legend{margin-top:22px}
+  .legend .bar{height:10px;border-radius:6px}
+  .legend .ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--sub);margin-top:5px}
+  .note{margin-top:14px;font-size:11px;color:var(--sub);line-height:1.7}
+  .note b{color:var(--ink);font-weight:600}
+  .err{color:#b91c1c;font-size:12px}
+</style>
+</head>
+<body>
+  <h1>每日用电情况</h1>
+  <div class="sub" id="sub">数据来源：完美校园 · 云缴费</div>
+
+  <div class="stats">
+    <div class="stat"><div class="k">合计电量</div><div class="n"><span id="total">--</span><small>度</small></div></div>
+    <div class="stat"><div class="k">日均电量</div><div class="n"><span id="avg">--</span><small>度</small></div></div>
+    <div class="stat"><div class="k">最高日</div><div class="n"><span id="peak">--</span><small>度</small></div></div>
+    <div class="stat"><div class="k">最低日</div><div class="n"><span id="low">--</span><small>度</small></div></div>
+  </div>
+
+  <div class="month" id="month">--</div>
+  <div class="week"><div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div></div>
+  <div class="grid" id="grid" style="margin-top:8px"></div>
+
+  <div class="legend">
+    <div class="bar" id="bar"></div>
+    <div class="ticks"><span>0</span><span>10</span><span>20</span><span>30+</span><span>度</span></div>
+  </div>
+
+  <div class="note">
+    <b>角标</b>：<span style="color:#ef4444">峰</span> = 当月用电最高的一天，
+    <span style="color:#16a34a">谷</span> = 当月用电最低的一天。<br>
+    日用量为「当日 00:00 余额 − 次日 00:00 余额」，即完整自然日。<br>
+    <span id="gen"></span>
+  </div>
+
+<script>
+const DATA_URL = "https://1321433363-ikaa3tlkc5.ap-guangzhou.tencentscf.com/data";
+const ANCHORS = [[0,[34,197,94]],[6,[14,165,233]],[12,[59,130,246]],[18,[168,85,247]],
+                 [23,[245,158,11]],[28,[249,115,22]],[30,[239,68,68]]];
+
+function colorFor(v){
+  v = Math.max(0, Math.min(30, v));
+  for (let i=0;i<ANCHORS.length-1;i++){
+    const [x0,c0]=ANCHORS[i], [x1,c1]=ANCHORS[i+1];
+    if (v<=x1){
+      const t = x1===x0 ? 0 : (v-x0)/(x1-x0);
+      return c0.map((c,k)=>Math.round(c+(c1[k]-c)*t));
+    }
+  }
+  return ANCHORS[ANCHORS.length-1][1];
+}
+const hex = c => "#"+c.map(x=>x.toString(16).padStart(2,"0")).join("");
+const rgba = (c,a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+function render(rows){
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();       // 0-based
+  const days = new Date(y, m+1, 0).getDate();
+  const firstWd = new Date(y, m, 1).getDay();            // 0=周日
+
+  const usage = {};
+  rows.forEach(r => { if (r && r.usage !== null && r.usage !== undefined) usage[r.date] = Number(r.usage); });
+  const prefix = `${y}-${String(m+1).padStart(2,"0")}-`;
+  const mv = {};
+  Object.keys(usage).forEach(k => { if (k.startsWith(prefix)) mv[k] = usage[k]; });
+
+  const vals = Object.values(mv);
+  const total = vals.reduce((a,b)=>a+b,0);
+  const avg = vals.length ? total/vals.length : 0;
+  let peakKey=null, lowKey=null;
+  Object.keys(mv).forEach(k=>{
+    if (peakKey===null || mv[k]>mv[peakKey]) peakKey=k;
+    if (lowKey===null || mv[k]<mv[lowKey]) lowKey=k;
+  });
+
+  document.getElementById("month").textContent = `${y}年${String(m+1).padStart(2,"0")}月`;
+  document.getElementById("total").textContent = total.toFixed(2);
+  document.getElementById("avg").textContent = avg.toFixed(2);
+  document.getElementById("peak").textContent = peakKey ? mv[peakKey].toFixed(2) : "0.00";
+  document.getElementById("low").textContent = lowKey ? mv[lowKey].toFixed(2) : "0.00";
+
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+  for (let i=0;i<firstWd;i++){
+    const d=document.createElement("div"); d.className="cell empty"; grid.appendChild(d);
+  }
+  for (let day=1; day<=days; day++){
+    const key = `${y}-${String(m+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+    const cell = document.createElement("div");
+    const v = mv[key];
+    if (v === undefined){
+      cell.className = "cell nodata";
+      cell.innerHTML = `<span class="d">${day}</span><span class="v">--</span>`;
+    } else {
+      const rgb = colorFor(v);
+      cell.className = "cell";
+      cell.style.background = rgba(rgb,.16);
+      cell.style.color = hex(rgb);
+      let badge = "";
+      if (key===peakKey) badge = `<span class="badge peak">峰</span>`;
+      else if (key===lowKey) badge = `<span class="badge valley">谷</span>`;
+      cell.innerHTML = `${badge}<span class="d">${day}</span><span class="v">${v.toFixed(2)}</span>`;
+    }
+    grid.appendChild(cell);
+  }
+  while (grid.children.length % 7 !== 0){
+    const d=document.createElement("div"); d.className="cell empty"; grid.appendChild(d);
+  }
+
+  const stops = [];
+  for (let i=0;i<=30;i++) stops.push(`${hex(colorFor(i))} ${Math.round(i/30*100)}%`);
+  document.getElementById("bar").style.background = `linear-gradient(90deg, ${stops.join(",")})`;
+
+  const latest = rows.filter(r=>r && r.balance!==null && r.balance!==undefined)
+                     .sort((a,b)=>a.date<b.date?-1:1).pop();
+  document.getElementById("sub").innerHTML =
+    "数据来源：完美校园 · 云缴费" + (latest ? `　|　当前余额 ${Number(latest.balance).toFixed(2)} 度（${latest.date}）` : "");
+  document.getElementById("gen").textContent = "更新时间 " + now.toLocaleString("zh-CN",{hour12:false});
+}
+
+fetch(DATA_URL, {cache:"no-store"})
+  .then(r => r.json())
+  .then(d => render(d.rows || []))
+  .catch(e => { document.getElementById("sub").innerHTML =
+      '<span class="err">数据加载失败：' + e + '</span>'; });
+</script>
+</body>
+</html>
